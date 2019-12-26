@@ -6,7 +6,7 @@ import time
 from PIL import ImageColor
 
 
-def draw_box(img_url, ns, child_conn):
+def draw_box(img_url, img_ns, info_ns, box_color=None):
     # "BLACK"
     box_colormap = ["NAVY", "BLUE", "AQUA", "TEAL", "OLIVE", "GREEN", "LIME", "ORANGE", "RED", "MAROON",
                     "FUCHSIA", "PURPLE", "GRAY", "SILVER"]
@@ -42,7 +42,7 @@ def draw_box(img_url, ns, child_conn):
                     #     print("info_q is empty, continued...")
                     #     time.sleep(0.01)
                     #     continue
-                    obj_info_frame = child_conn.curr_frame
+                    obj_info_frame = info_ns.curr_frame
 
                     for obj in obj_info_frame.objects:
                         left = round(
@@ -54,7 +54,12 @@ def draw_box(img_url, ns, child_conn):
                         bottom = round((obj.relative_coordinates.center_y + (
                                 obj.relative_coordinates.height / 2.0)) * image_height)
 
-                        color = ImageColor.getrgb(box_colormap[obj.state.uid % color_len])
+                        if box_color is None:
+                            color = ImageColor.getrgb(box_colormap[obj.state.uid % color_len])
+
+                        else:
+                            color = ImageColor.getrgb(box_color)
+
                         color = [v for v in reversed(color)]
                         # print(box_colormap[obj.uid % color_len])
                         # Draw a box around the face
@@ -68,17 +73,44 @@ def draw_box(img_url, ns, child_conn):
                             formatted_time = "%dh%dm" % (stay_time[3], stay_time[4])
                         else:
                             formatted_time = "%dm%ds" % (stay_time[4], stay_time[5])
-                        frame = ft.draw_text(frame, (left + 6, top - 25), "實驗室帥哥<%d>  %s" % (obj.state.uid, formatted_time),
+                        # frame = ft.draw_text(frame, (left + 6, top - 25), "實驗室帥哥<%d>  %s" % (obj.state.uid, formatted_time),
+                        #                      20,
+                        #                      (255, 255, 255))
+                        frame = ft.draw_text(frame, (left + 6, top - 25), "機器人用籃球",
                                              20,
                                              (255, 255, 255))
 
                     # Display the resulting image
 
-                    # cv2.imshow("frame", frame)
-                    # if cv2.waitKey(1) == 27:
-                    #     exit(0)
+                    cv2.imshow("frame", frame)
+                    if cv2.waitKey(1) == 27:
+                        exit(0)
                     frame = cv2.imencode(".jpeg", frame, (cv2.IMWRITE_JPEG_QUALITY, cameraQuality))[1]
-                    ns.img = frame
+                    img_ns.img = frame
+
+                    # Clear mybytes buffer to prevent internal bound shift
+                    mybytes = bytes()
+
+
+def read_mjpeg_stream(img_url):
+    r = requests.get(img_url, stream=True)
+    if r.status_code == 200:
+        mybytes = bytes()
+        for chunk in r.iter_content(chunk_size=1024):
+            mybytes += chunk
+            a = mybytes.find(b'\xff\xd8')
+            b = mybytes.find(b'\xff\xd9')
+
+            if a != -1 and b != -1:
+                if not a < (b + 2):
+                    # flush to head flag to find correct range
+                    mybytes = mybytes[a:]
+                else:
+                    jpg = mybytes[a:b + 2]
+                    # mybytes = mybytes[b + 2:]
+                    # mybytes = bytes()
+
+                    frame = cv2.imdecode(np.fromstring(jpg, dtype=np.uint8), cv2.IMREAD_COLOR)
 
                     # Clear mybytes buffer to prevent internal bound shift
                     mybytes = bytes()

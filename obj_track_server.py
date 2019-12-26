@@ -7,7 +7,10 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 from socketserver import ThreadingMixIn
 import time
 from multiprocessing import Process, Manager, Queue
-from util.obj_track import handle_yolo_result
+
+import multiprocessing
+
+from util.obj_track import ObjectTrack
 from util.draw_result import draw_box
 # from util.lab_cast import cast_audio
 
@@ -35,7 +38,7 @@ class RequestHandler(BaseHTTPRequestHandler):
         lastFrameTime = 0
         while True:
 
-            contents = self.server.img_ns.img
+            contents = self.server.frame_ns.img
 
             # Wait if required so we stay under the max FPS
             if lastFrameTime != 0:
@@ -60,30 +63,28 @@ class ThreadingHTTPServer(ThreadingMixIn, HTTPServer):
     pass
 
 
-def start_track_server():
+def start_track_process(frame_ns, state_q=Queue()):
     port = 8091
     indoor_url = 'http://203.64.134.236:8070'
-    img_url = "http://192.168.0.216:8080/video"
+    # img_url = "http://192.168.0.200:8080/video"
+    img_url = "http://192.168.0.101:8080/stream?topic=/usb_cam_node/image_raw&type=ros_compressed"
 
     server = ThreadingHTTPServer(("0.0.0.0", port), RequestHandler)
     server.maxfps = 0
     print("Listening on Port " + str(port) + "...")
+    server.frame_ns = frame_ns
+    server.frame_ns.img = None
 
-    manager = Manager()
-    server.img_ns = manager.Namespace()
-    server.img_ns.img = None
+    frame_ns.curr_frame = None
 
-    info_ns = manager.Namespace()
-    info_ns.curr_frame = None
-    # state_q = Queue()
-    state_q = None
-    obj_track = Process(target=handle_yolo_result, args=(indoor_url, info_ns, state_q))
+    obj_track = Process(target=ObjectTrack, args=(indoor_url, frame_ns, state_q, False),
+                        kwargs={'obj_filter': ball_filter})
     obj_track.start()
 
-    while info_ns.curr_frame is None:
+    while frame_ns.curr_frame is None:
         time.sleep(0.0001)
 
-    track_draw = Process(target=draw_box, args=(img_url, server.img_ns, info_ns))
+    track_draw = Process(target=draw_box, args=(img_url, frame_ns, frame_ns, "ORANGE"))
     track_draw.start()
     # track_draw.join()
 
@@ -92,5 +93,15 @@ def start_track_server():
     # lab_cast.start()
 
 
+def ball_filter(obj):
+    print(obj["name"])
+    if obj["name"] == "sports ball":
+        return True
+    # return True
+
+
 if __name__ == "__main__":
-    start_track_server()
+    manager = Manager()
+    ns = manager.Namespace()
+
+    start_track_process(ns, None)
